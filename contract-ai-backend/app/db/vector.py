@@ -1,34 +1,100 @@
-from qdrant_client import QdrantClient
-from qdrant_client.http.models import VectorParams, PointStruct, Distance
-from app.config import QDRANT_URL
+import chromadb
+from chromadb.config import Settings
+from typing import List, Dict, Any, Optional
+import uuid
 
-client = QdrantClient(QDRANT_URL)
-DIM = 384  # Dimension for all-MiniLM-L6-v2
-
-def ensure_collection(name="contracts_default"):
-    """Ensure collection exists, create if it doesn't"""
-    colls = [c.name for c in client.get_collections().collections]
-    if name not in colls:
-        client.recreate_collection(
-            name,
-            vectors_config=VectorParams(size=DIM, distance=Distance.COSINE)
+class ChromaDBManager:
+    def __init__(self, persist_directory: str = "./chroma_db"):
+        """Initialize ChromaDB client and collection management"""
+        self.client = chromadb.PersistentClient(
+            path=persist_directory,
+            settings=Settings(anonymized_telemetry=False)
         )
+        self.collections = {}
+        
+    def get_or_create_collection(self, name: str) -> Any:
+        """Get or create a collection"""
+        if name not in self.collections:
+            self.collections[name] = self.client.get_or_create_collection(
+                name=name,
+                metadata={"hnsw:space": "cosine"}
+            )
+        return self.collections[name]
+    
+    def add_documents(self, 
+                     documents: List[str], 
+                     embeddings: List[List[float]], 
+                     metadatas: List[Dict[str, Any]], 
+                     ids: List[str],
+                     collection_name: str = "contracts") -> None:
+        """Add documents with embeddings to ChromaDB"""
+        collection = self.get_or_create_collection(collection_name)
+        collection.add(
+            documents=documents,
+            embeddings=embeddings,
+            metadatas=metadatas,
+            ids=ids
+        )
+    
+    def search_similar(self, 
+                      query_embedding: List[float], 
+                      collection_name: str = "contracts",
+                      top_k: int = 5,
+                      where: Optional[Dict] = None) -> Dict[str, Any]:
+        """Search for similar documents"""
+        collection = self.get_or_create_collection(collection_name)
+        results = collection.query(
+            query_embeddings=[query_embedding],
+            n_results=top_k,
+            where=where
+        )
+        return results
+    
+    def get_collection_count(self, collection_name: str = "contracts") -> int:
+        """Get count of documents in collection"""
+        collection = self.get_or_create_collection(collection_name)
+        return collection.count()
+    
+    def delete_collection(self, collection_name: str) -> None:
+        """Delete a collection"""
+        if collection_name in self.collections:
+            del self.collections[collection_name]
+        try:
+            self.client.delete_collection(collection_name)
+        except:
+            pass
+    
+    def get_collection_info(self, collection_name: str = "contracts") -> Dict[str, Any]:
+        """Get collection information"""
+        collection = self.get_or_create_collection(collection_name)
+        return {
+            "name": collection_name,
+            "count": collection.count(),
+            "metadata": collection.metadata
+        }
 
-def add_embeddings(vectors, payloads, name="contracts_default"):
-    """Add embeddings to vector database"""
-    ensure_collection(name)
-    points = [PointStruct(id=i, vector=v, payload=payloads[i]) for i, v in enumerate(vectors)]
-    client.upsert(name, points=points)
+# Global instance
+chroma_manager = ChromaDBManager()
 
-def search_embeddings(query_vector, top_k=5, name="contracts_default"):
-    """Search for similar embeddings"""
-    ensure_collection(name)
-    return client.search(name, query_vector=query_vector, limit=top_k)
+# Convenience functions for backward compatibility
+def search_embeddings(query_embedding: List[float], collection_name: str = "contracts", top_k: int = 5) -> Dict[str, Any]:
+    """Search for similar documents using embeddings"""
+    return chroma_manager.search_similar(
+        query_embedding=query_embedding,
+        collection_name=collection_name,
+        top_k=top_k
+    )
 
-def delete_collection(name="contracts_default"):
-    """Delete a collection"""
-    client.delete_collection(name)
-
-def get_collection_info(name="contracts_default"):
+def get_collection_info(collection_name: str = "contracts") -> Dict[str, Any]:
     """Get collection information"""
-    return client.get_collection(name)
+    return chroma_manager.get_collection_info(collection_name)
+
+def store_embedding(text: str, embedding: List[float], metadata: Dict[str, Any], doc_id: str, collection_name: str = "contracts") -> None:
+    """Store a single embedding"""
+    chroma_manager.add_documents(
+        documents=[text],
+        embeddings=[embedding],
+        metadatas=[metadata],
+        ids=[doc_id],
+        collection_name=collection_name
+    )

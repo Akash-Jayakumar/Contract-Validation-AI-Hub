@@ -1,6 +1,5 @@
 from fastapi import APIRouter, Body, HTTPException
-from app.services.embeddings import embed_text
-from app.db.vector import search_embeddings
+from app.services.embeddings import embed_text, semantic_search
 
 router = APIRouter()
 
@@ -16,15 +15,18 @@ def chat_contract(query: dict = Body(...)):
         query_vector = embed_text(question)
         
         # Search for relevant chunks
-        hits = search_embeddings(query_vector, top_k=5)
+        results = semantic_search(question, top_k=5)
         
         # Prepare context from search results
-        context = "\n".join([hit.payload['text'] for hit in hits])
+        if results and results.get('documents'):
+            context = "\n".join([doc for doc in results['documents'][0]])
+        else:
+            context = ""
         
         return {
             "question": question,
             "context": context,
-            "matches": len(hits)
+            "matches": len(results.get('documents', [[]])[0]) if results else 0
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error: {e}")

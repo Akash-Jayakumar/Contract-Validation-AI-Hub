@@ -1,16 +1,24 @@
 from pydantic import BaseModel
-from typing import Optional, List
-from datetime import datetime
-
-class ContractMetadata(BaseModel):
-    contract_id: str
-    filename: str
-    lang: str = "eng"
-    chunks: int
-    text_length: int
-    upload_date: Optional[datetime] = None
+from typing import List, Optional
 
 class ContractUploadResponse(BaseModel):
     contract_id: str
-    chunks: int
-    status: str
+    filename: str
+    chunks_processed: int
+    document_ids: List[str]
+
+class SearchQuery(BaseModel):
+    text: str
+    top_k: Optional[int] = 5
+    contract_id: Optional[str] = None
+
+class SearchResult(BaseModel):
+    text: str
+    contract_id: Optional[str]
+    chunk_index: Optional[int]
+    score: float
+
+class SearchResponse(BaseModel):
+    query: str
+    results: List[SearchResult]
+    total_results: int
