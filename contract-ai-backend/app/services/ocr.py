@@ -3,6 +3,9 @@ from PIL import Image
 import pytesseract
 from pdf2image import convert_from_path
 
+# 👇 Explicitly tell pytesseract where tesseract.exe is located
+pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+
 def extract_text(file_path: str, lang: str = "eng") -> str:
     """
     Extract text from image or PDF files using OCR
