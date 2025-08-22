@@ -3,8 +3,38 @@ from PIL import Image
 import pytesseract
 from pdf2image import convert_from_path
 
-# 👇 Explicitly tell pytesseract where tesseract.exe is located
-pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+# Configure tesseract path - try to find it automatically or use environment variable
+def get_tesseract_path():
+    """Get tesseract executable path from environment or common locations"""
+    # Check environment variable first
+    tesseract_path = os.getenv('TESSERACT_PATH')
+    if tesseract_path and os.path.exists(tesseract_path):
+        return tesseract_path
+    
+    # Common Windows path
+    windows_path = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+    if os.path.exists(windows_path):
+        return windows_path
+    
+    # Common Linux path
+    linux_path = "/usr/bin/tesseract"
+    if os.path.exists(linux_path):
+        return linux_path
+    
+    # Try to find in PATH
+    try:
+        import shutil
+        return shutil.which("tesseract")
+    except:
+        pass
+    
+    raise FileNotFoundError(
+        "Tesseract not found. Please install Tesseract OCR and set TESSERACT_PATH environment variable "
+        "or ensure tesseract is in your system PATH."
+    )
+
+# Set tesseract path
+pytesseract.pytesseract.tesseract_cmd = get_tesseract_path()
 
 def extract_text(file_path: str, lang: str = "eng") -> str:
     """
@@ -32,3 +62,29 @@ def extract_text(file_path: str, lang: str = "eng") -> str:
         raise ValueError(f"Unsupported file type: {ext}")
     
     return text.strip()
+
+def extract_text_from_pdf(file_path: str, lang: str = "eng") -> str:
+    """
+    Extract text specifically from PDF files
+    
+    Args:
+        file_path: Path to the PDF file
+        lang: Language code for OCR (default: eng)
+    
+    Returns:
+        Extracted text as string
+    """
+    return extract_text(file_path, lang)
+
+def extract_text_from_image(file_path: str, lang: str = "eng") -> str:
+    """
+    Extract text specifically from image files
+    
+    Args:
+        file_path: Path to the image file
+        lang: Language code for OCR (default: eng)
+    
+    Returns:
+        Extracted text as string
+    """
+    return extract_text(file_path, lang)

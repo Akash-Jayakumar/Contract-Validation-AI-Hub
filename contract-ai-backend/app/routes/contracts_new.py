@@ -1,68 +1,60 @@
 from fastapi import APIRouter, File, UploadFile, HTTPException, Body
-from fastapi.responses import JSONResponse
 from typing import List, Optional
 import uuid
 import os
 import shutil
-from app.services.ocr import extract_text
+from app.services.ocr import extract_text_from_pdf, extract_text_from_image
 from app.services.chunk import chunk_text
 from app.services.embeddings import embed_chunks, store_embeddings, semantic_search, get_contract_chunks
 from app.models.contract import ContractUploadResponse, SearchQuery, SearchResponse
+from app.db.vector import chroma_manager
 
 router = APIRouter(prefix="/contracts", tags=["contracts"])
 
+# Define a local upload directory inside your project
 UPLOAD_DIR = os.path.join(os.getcwd(), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 @router.post("/upload", response_model=ContractUploadResponse)
 async def upload_contract(file: UploadFile = File(...)):
     """Upload and process a contract document"""
-    contract_id = str(uuid.uuid4())
-    file_path = os.path.join(UPLOAD_DIR, f"{contract_id}_{file.filename}")
     try:
+        contract_id = str(uuid.uuid4())
+        file_path = os.path.join(UPLOAD_DIR, f"{contract_id}_{file.filename}")
+        
         # Save file
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"File save error: {e}")
-
-    # Extract text based on file type
-    try:
-        if file.filename.lower().endswith(('.pdf', '.png', '.jpg', '.jpeg', '.tiff', '.bmp')):
-            try:
-                text = extract_text(file_path)
-            except Exception as e:
-                # Specific handling for poppler/pdf2image errors
-                if "Unable to get page count" in str(e) or "poppler" in str(e).lower():
-                    raise HTTPException(
-                        status_code=500,
-                        detail="PDF/image extraction failed: Poppler may not be installed, or in PATH, or your system requires a restart. See https://github.com/oschwartz10612/poppler-windows/releases/ and ensure C:/poppler/bin is in your PATH."
-                    )
-                else:
-                    raise HTTPException(status_code=500, detail=f"OCR/text extraction error: {e}")
+        
+        # Extract text based on file type
+        if file.filename.lower().endswith('.pdf'):
+            text = extract_text_from_pdf(file_path)
+        elif file.filename.lower().endswith(('.png', '.jpg', '.jpeg', '.tiff', '.bmp')):
+            text = extract_text_from_image(file_path)
         else:
             raise HTTPException(status_code=400, detail="Unsupported file type")
+        
         if not text.strip():
             raise HTTPException(status_code=400, detail="Could not extract text from document")
-    except HTTPException as he:
-        raise he
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Unexpected extraction error: {e}")
-
-    # Chunk and embed
-    try:
+        
+        # Chunk text
         chunks = chunk_text(text)
+        
+        # Generate embeddings
         embeddings = embed_chunks(chunks)
+        
+        # Store in ChromaDB
         doc_ids = store_embeddings(contract_id, chunks, embeddings)
+        
+        return ContractUploadResponse(
+            contract_id=contract_id,
+            filename=file.filename,
+            chunks_processed=len(chunks),
+            document_ids=doc_ids
+        )
+        
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Chunk/embed/index error: {e}")
-
-    return ContractUploadResponse(
-        contract_id=contract_id,
-        filename=file.filename,
-        chunks_processed=len(chunks),
-        document_ids=doc_ids
-    )
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/search", response_model=SearchResponse)
 async def semantic_search_endpoint(query: SearchQuery = Body(...)):
@@ -117,19 +109,15 @@ async def get_contract_chunks_endpoint(contract_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-import chromadb
-
-chroma_client = chromadb.Client()
-collection = chroma_client.get_or_create_collection("contracts")
-
 @router.get("/{contract_id}/info")
 async def get_contract_info(contract_id: str):
     """Get contract information"""
     try:
-        count = collection.count()
+        count = chroma_manager.get_collection_count("contracts")
         return {
             "contract_id": contract_id,
             "total_documents_in_db": count
         }
+        
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
