@@ -1,18 +1,79 @@
 from typing import Dict, List, Optional
-import openai
+import os
+import requests
+from app.config import GEMINI_API_KEY
+
+
+def gemini_flash_complete(prompt: str, model_id: str = "gemini-2.0-flash-exp") -> str:
+    """Generate content using Gemini Flash model"""
+    if not GEMINI_API_KEY:
+        raise ValueError("GEMINI_API_KEY environment variable is not set")
+    
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={GEMINI_API_KEY}"
+    headers = {"Content-Type": "application/json"}
+    data = {
+        "contents": [{"parts": [{"text": prompt}]}]
+    }
+    
+    try:
+        resp = requests.post(url, headers=headers, json=data)
+        resp.raise_for_status()
+        result = resp.json()
+        
+        # Extract generated text from result
+        if "candidates" in result and result["candidates"]:
+            candidate = result["candidates"][0]
+            if "content" in candidate and "parts" in candidate["content"]:
+                parts = candidate["content"]["parts"]
+                if parts and "text" in parts[0]:
+                    return parts[0]["text"]
+        
+        # Fallback if the response structure is different
+        return "No response generated from Gemini"
+        
+    except requests.exceptions.RequestException as e:
+        raise Exception(f"Gemini API request failed: {e}")
+    except (KeyError, IndexError) as e:
+        raise Exception(f"Failed to parse Gemini response: {e}")
+
 
 class LLMService:
     """Service for handling LLM interactions"""
     
     @staticmethod
-    def generate_response(prompt: str, context: str, max_tokens: int = 500) -> str:
+    def generate_response(prompt: str, context: str, max_tokens: int = 500, use_gemini: bool = True) -> str:
         """Generate response using LLM"""
-        # Placeholder for LLM integration
-        # This would integrate with OpenAI, Anthropic, or other LLM providers
-        return f"Generated response based on context: {context[:100]}..."
+        if use_gemini:
+            try:
+                full_prompt = f"Context: {context}\n\nQuestion: {prompt}\n\nPlease provide a helpful response based on the context."
+                return gemini_flash_complete(full_prompt)
+            except Exception as e:
+                # Fallback to placeholder if Gemini fails
+                return f"Generated response based on context: {context[:100]}... (Gemini error: {str(e)})"
+        else:
+            # Placeholder for other LLM integrations
+            return f"Generated response based on context: {context[:100]}..."
     
     @staticmethod
-    def analyze_contract(text: str) -> Dict:
+    def analyze_contract(text: str, use_gemini: bool = True) -> Dict:
         """Analyze contract text for key insights"""
-        # Placeholder for contract analysis logic
-        return {"insights": "Analysis results would go here."}
+        if use_gemini:
+            try:
+                prompt = f"""Analyze the following contract text and provide key insights about financial health, risks, and important clauses:
+
+{text}
+
+Please provide a structured analysis with the following sections:
+1. Financial Health Assessment
+2. Risk Identification
+3. Key Clauses Summary
+4. Recommendations"""
+                
+                analysis = gemini_flash_complete(prompt)
+                return {"insights": analysis}
+            except Exception as e:
+                # Fallback to placeholder if Gemini fails
+                return {"insights": f"Analysis results would go here. (Gemini error: {str(e)})"}
+        else:
+            # Placeholder for other analysis methods
+            return {"insights": "Analysis results would go here."}
