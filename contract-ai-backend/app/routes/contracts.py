@@ -117,19 +117,25 @@ async def get_contract_chunks_endpoint(contract_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-import chromadb
-
-chroma_client = chromadb.Client()
-collection = chroma_client.get_or_create_collection("contracts")
+from app.db.vector import chroma_manager
 
 @router.get("/{contract_id}/info")
 async def get_contract_info(contract_id: str):
     """Get contract information"""
     try:
-        count = collection.count()
+        # Get count for this specific contract
+        results = chroma_manager.search_similar(
+            query_embedding=[0.0] * 384,  # Dummy embedding, we just want to use where clause
+            top_k=1000,
+            where={"contract_id": contract_id}
+        )
+        
+        chunk_count = len(results["documents"][0]) if results["documents"] and results["documents"][0] else 0
+        
         return {
             "contract_id": contract_id,
-            "total_documents_in_db": count
+            "chunk_count": chunk_count,
+            "total_documents_in_db": chroma_manager.get_collection_count()
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

@@ -4,6 +4,7 @@ from app.routes.clauses import router as clauses_router
 from app.routes.chat import router as chat_router
 from app.routes.validation import router as validation_router
 from app.routes.reports import router as reports_router
+from app.routes.ai import router as ai_router
 
 app = FastAPI(title="Contract AI Backend")
 app.include_router(contracts_router, prefix="/contracts", tags=["contracts"])
@@ -11,6 +12,7 @@ app.include_router(clauses_router, prefix="/clauses", tags=["clauses"])
 app.include_router(chat_router, prefix="/contracts/chat", tags=["chat"])
 app.include_router(validation_router, prefix="/contracts", tags=["validation"])
 app.include_router(reports_router, prefix="/reports", tags=["reports"])
+app.include_router(ai_router, prefix="/ai", tags=["ai"])
 
 @app.get("/")
 async def root():
