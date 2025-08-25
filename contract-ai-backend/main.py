@@ -28,3 +28,5 @@ async def root():
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
+from app.routes.checklist import router as checklist_router
+app.include_router(checklist_router, prefix="/checklist", tags=["checklist"])
