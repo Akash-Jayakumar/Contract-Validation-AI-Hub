@@ -1,6 +1,8 @@
 from typing import Dict, List, Optional
 import os
 import requests
+import json
+import re
 from app.config import GEMINI_API_KEY
 
 
@@ -35,6 +37,45 @@ def gemini_flash_complete(prompt: str, model_id: str = "gemini-2.0-flash-exp") -
         raise Exception(f"Gemini API request failed: {e}")
     except (KeyError, IndexError) as e:
         raise Exception(f"Failed to parse Gemini response: {e}")
+
+
+class LLMJsonError(Exception):
+    pass
+
+
+def gemini_json(prompt: str) -> dict:
+    """Generate structured JSON response using Gemini Flash model"""
+    if not GEMINI_API_KEY:
+        raise LLMJsonError("GEMINI_API_KEY not set")
+    
+    GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash-exp")
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
+    headers = {"Content-Type": "application/json"}
+    data = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "temperature": 0.2,
+            "responseMimeType": "application/json"
+        }
+    }
+    
+    try:
+        r = requests.post(url, headers=headers, json=data, timeout=60)
+        r.raise_for_status()
+        payload = r.json()
+        
+        # Try to parse JSON directly; fall back to extracting a JSON block.
+        part = payload["candidates"][0]["content"]["parts"][0].get("text", "")
+        try:
+            return json.loads(part)
+        except Exception:
+            m = re.search(r"\{[\s\S]*\}", part)
+            if m:
+                return json.loads(m.group(0))
+            raise LLMJsonError(f"Gemini returned non-JSON output: {part[:200]}")
+            
+    except requests.exceptions.RequestException as e:
+        raise LLMJsonError(f"Gemini API request failed: {e}")
 
 
 class LLMService:
