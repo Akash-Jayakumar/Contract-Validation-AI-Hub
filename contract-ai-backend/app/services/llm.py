@@ -43,36 +43,41 @@ class LLMJsonError(Exception):
     pass
 
 
-def gemini_json(prompt: str) -> dict:
-    """Generate structured JSON response using Gemini Flash model"""
+def gemini_json(prompt: str, response_schema: dict | None = None, temperature: float = 0.1, timeout: int = 90) -> dict:
+    """Generate structured JSON response using Gemini Flash model with optional schema"""
     if not GEMINI_API_KEY:
         raise LLMJsonError("GEMINI_API_KEY not set")
     
     GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash-exp")
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
     headers = {"Content-Type": "application/json"}
-    data = {
+    
+    gen_cfg = {
+        "temperature": temperature,
+        "responseMimeType": "application/json"
+    }
+    if response_schema:
+        gen_cfg["responseSchema"] = response_schema
+    
+    payload = {
         "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {
-            "temperature": 0.2,
-            "responseMimeType": "application/json"
-        }
+        "generationConfig": gen_cfg
     }
     
     try:
-        r = requests.post(url, headers=headers, json=data, timeout=60)
+        r = requests.post(url, headers=headers, json=payload, timeout=timeout)
         r.raise_for_status()
-        payload = r.json()
+        data = r.json()
         
-        # Try to parse JSON directly; fall back to extracting a JSON block.
-        part = payload["candidates"][0]["content"]["parts"][0].get("text", "")
+        # Extract text from response
+        text = data["candidates"][0]["content"]["parts"][0].get("text", "")
         try:
-            return json.loads(part)
+            return json.loads(text)
         except Exception:
-            m = re.search(r"\{[\s\S]*\}", part)
+            m = re.search(r"\{[\s\S]*\}", text)
             if m:
                 return json.loads(m.group(0))
-            raise LLMJsonError(f"Gemini returned non-JSON output: {part[:200]}")
+            raise LLMJsonError(f"Non-JSON output: {text[:200]}")
             
     except requests.exceptions.RequestException as e:
         raise LLMJsonError(f"Gemini API request failed: {e}")
