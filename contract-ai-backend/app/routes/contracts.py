@@ -1,60 +1,67 @@
 from fastapi import APIRouter, File, UploadFile, HTTPException, Body
-from typing import List, Optional
+from typing import List
 import uuid
 import os
 import shutil
-from app.services.ocr import extract_text_from_pdf, extract_text_from_image
+from app.services.ocr import extract_text_from_image
 from app.services.chunk import chunk_text
 from app.services.embeddings import embed_chunks, store_embeddings, semantic_search, get_contract_chunks
 from app.models.contract import ContractUploadResponse, SearchQuery, SearchResponse
 from app.db.vector import chroma_manager
+from pdfminer.high_level import extract_text
 
 router = APIRouter(prefix="/contracts", tags=["contracts"])
 
-# Define a local upload directory inside your project
+# Local upload dir (optional backup)
 UPLOAD_DIR = os.path.join(os.getcwd(), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+def extract_text_from_pdf(file_path: str) -> str:
+    """Extract text using pdfminer."""
+    return extract_text(file_path)
 
 @router.post("/upload", response_model=ContractUploadResponse)
 async def upload_contract(file: UploadFile = File(...)):
     """Upload and process a contract document"""
     try:
         contract_id = str(uuid.uuid4())
-        file_path = os.path.join(UPLOAD_DIR, f"{contract_id}_{file.filename}")
-        
-        # Save file
+        file_ext = file.filename.lower().split(".")[-1]
+        file_path = os.path.join(UPLOAD_DIR, f"{contract_id}.{file_ext}")
+
+        # Save locally
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-        
-        # Extract text based on file type
-        if file.filename.lower().endswith('.pdf'):
+
+        # Extract text
+        if file_ext == "pdf":
             text = extract_text_from_pdf(file_path)
-        elif file.filename.lower().endswith(('.png', '.jpg', '.jpeg', '.tiff', '.bmp')):
+        elif file_ext in ("png", "jpg", "jpeg", "tiff", "bmp"):
             text = extract_text_from_image(file_path)
         else:
             raise HTTPException(status_code=400, detail="Unsupported file type")
-        
+
         if not text.strip():
             raise HTTPException(status_code=400, detail="Could not extract text from document")
-        
+
         # Chunk text
         chunks = chunk_text(text)
-        
-        # Generate embeddings
+
+        # Embeddings
         embeddings = embed_chunks(chunks)
-        
-        # Store in ChromaDB
+
+        # Store in Chroma
         doc_ids = store_embeddings(contract_id, chunks, embeddings)
-        
+
         return ContractUploadResponse(
             contract_id=contract_id,
             filename=file.filename,
             chunks_processed=len(chunks),
             document_ids=doc_ids
         )
-        
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.post("/search", response_model=SearchResponse)
 async def semantic_search_endpoint(query: SearchQuery = Body(...)):
@@ -65,37 +72,37 @@ async def semantic_search_endpoint(query: SearchQuery = Body(...)):
             top_k=query.top_k or 5,
             contract_id=query.contract_id
         )
-        
-        # Format results
+
         formatted_results = []
         if results['documents'] and results['documents'][0]:
-            for i, (doc, metadata, distance) in enumerate(zip(
+            for doc, metadata, distance in zip(
                 results['documents'][0],
                 results['metadatas'][0],
                 results['distances'][0]
-            )):
+            ):
                 formatted_results.append({
                     "text": doc,
                     "contract_id": metadata.get("contract_id"),
                     "chunk_index": metadata.get("chunk_index"),
                     "score": 1 - distance
                 })
-        
+
         return SearchResponse(
             query=query.text,
             results=formatted_results,
             total_results=len(formatted_results)
         )
-        
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.get("/{contract_id}/chunks")
 async def get_contract_chunks_endpoint(contract_id: str):
     """Get all chunks for a specific contract"""
     try:
         results = get_contract_chunks(contract_id)
-        
+
         formatted_results = []
         if results['documents'] and results['documents'][0]:
             for doc, metadata in zip(results['documents'][0], results['metadatas'][0]):
@@ -103,30 +110,30 @@ async def get_contract_chunks_endpoint(contract_id: str):
                     "text": doc,
                     "chunk_index": metadata.get("chunk_index")
                 })
-        
+
         return {"contract_id": contract_id, "chunks": formatted_results}
-        
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.get("/{contract_id}/info")
 async def get_contract_info(contract_id: str):
     """Get contract information"""
     try:
-        # Get count for this specific contract
         results = chroma_manager.search_similar(
-            query_embedding=[0.0] * 384,  # Dummy embedding, just to use where clause
+            query_embedding=[0.0] * 384,  # dummy embedding
             top_k=1000,
             where={"contract_id": contract_id}
         )
-        
+
         chunk_count = len(results["documents"][0]) if results["documents"] and results["documents"][0] else 0
-        
+
         return {
             "contract_id": contract_id,
             "chunk_count": chunk_count,
             "total_documents_in_db": chroma_manager.get_collection_count()
         }
-        
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
