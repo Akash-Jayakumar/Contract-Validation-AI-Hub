@@ -63,6 +63,19 @@ Output strict JSON:
   ]
 }}
 """
+def auto_violation(contract_text: str):
+    """
+    Dummy implementation of auto_violation.
+    Replace with your real violation detection logic.
+    """
+    return [
+        {
+            "id": "V1",
+            "type": "Compliance",
+            "clause_id": "C3",
+            "message": "GDPR compliance violation due to missing Data Protection Clause."
+        }
+    ]
 
 # ---------- Risk calculator ----------
 def weighted_overall(violations: List[Dict[str, Any]]) -> int:

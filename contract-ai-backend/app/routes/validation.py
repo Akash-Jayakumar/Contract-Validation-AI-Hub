@@ -1,59 +1,64 @@
 from fastapi import APIRouter, Body, HTTPException
-from typing import List, Dict, Any
-from app.services.embeddings import semantic_search
-from app.db.mongo import get_clauses
+from typing import Dict, Any
+from datetime import datetime
+from app.services.embeddings import embed_chunks
 from app.db.vector import chroma_manager
-from fastapi import APIRouter, File, UploadFile, HTTPException, Body
-from typing import List, Optional
-import uuid
-import os
-import boto3
-import shutil
-from app.services.ocr import extract_text_from_pdf, extract_text_from_image
-from app.services.chunk import chunk_text
-from app.services.embeddings import embed_chunks, store_embeddings, semantic_search, get_contract_chunks
-from app.models.contract import ContractUploadResponse, SearchQuery, SearchResponse
-from app.db.vector import chroma_manager
+
 router = APIRouter()
 
-CLAUSE_CHECKS = [
-    {"name": "Confidentiality", "query": "confidentiality obligations reasonable care survive years"},
-    {"name": "Termination for Convenience", "query": "terminate for convenience days notice payment performed"},
-    {"name": "Limitation for Liability", "query": "limitation for liability cap exclude consequential damages"},
-    {"name": "IP Ownership", "query": "intellectual property ownership license pre-existing"},
+# Clause definitions with expected checklist items
+CLAUSE_LIBRARY = [
+    {
+        "id": "C1",
+        "name": "Confidentiality Clause",
+        "query": "confidentiality obligations nda survive termination",
+        "items": [
+            {"id": "I1", "description": "NDA terms clearly defined"},
+            {"id": "I2", "description": "Covers employees & contractors"},
+            {"id": "I3", "description": "Survives contract termination"},
+        ],
+    },
+    {
+        "id": "C2",
+        "name": "Termination Clause",
+        "query": "termination notice breach convenience",
+        "items": [
+            {"id": "I1", "description": "Termination notice period specified"},
+            {"id": "I2", "description": "Termination for breach included"},
+            {"id": "I3", "description": "Termination for convenience defined"},
+        ],
+    },
+    {
+        "id": "C3",
+        "name": "Data Protection Clause",
+        "query": "data protection gdpr privacy personal data",
+        "items": [
+            {"id": "I1", "description": "GDPR compliance mentioned"},
+            {"id": "I2", "description": "Data retention policy defined"},
+        ],
+    },
 ]
 
-COMPLIANCE_POLICIES = [
-    {"policy": "Payment Terms", "query": "payment terms net 30 late fees capped", "rule": "Net 30 days with capped late fees."},
-    {"policy": "Governing Law", "query": "governing law jurisdiction venue", "rule": "Governing law explicitly specified."},
-    {"policy": "Data Protection", "query": "consumer data pii gdpr consent", "rule": "Personal data handled properly."},
-    {"policy": "Force Majeure", "query": "force majeure suspension", "rule": "Force majeure clause present."},
-    {"policy": "Audit Rights", "query": "audit right inspect records", "rule": "Reasonable audit rights."},
-]
 
-VIOLATION_POLICIES = [
-    {"policy": "Uncapped Liability", "query": "uncapped liability indemnity", "explain": "Uncapped liability clause found.", "threshold": 70, "tag": "Legal"},
-    {"policy": "No Termination for Convenience", "query": "no termination convenience clause", "explain": "Missing termination for convenience.", "threshold": 60, "tag": "Operational"},
-    {"policy": "Weak Confidentiality", "query": "confidentiality less than one year", "explain": "Confidentiality period too short.", "threshold": 50, "tag": "Data Privacy"},
-]
+def compliance_score(match_text: str, query: str) -> int:
+    """Very simple scoring based on keyword hits."""
+    if not match_text:
+        return 0
+    text = match_text.lower()
+    score = 0
+    for kw in query.split():
+        if kw in text:
+            score += 20
+    return min(100, score)
 
-def _score(text: str, include: List[str], exclude: List[str]) -> int:
-    txt = (text or "").lower()
-    score = 50
-    for inc in include:
-        if inc in txt:
-            score += 10
-    for exc in exclude:
-        if exc in txt:
-            score -= 10
-    return max(0, min(100, score))
 
-def _risk_level(score: int) -> str:
+def risk_level_from_score(score: int) -> str:
     if score >= 70:
-        return "High"
+        return "Low"
     elif score >= 40:
         return "Medium"
-    return "Low"
+    return "High"
+
 
 @router.post("/validate")
 def validate_contract(payload: Dict[str, Any] = Body(...)):
@@ -62,45 +67,129 @@ def validate_contract(payload: Dict[str, Any] = Body(...)):
         raise HTTPException(status_code=400, detail="contract_id is required")
 
     try:
-        clauses = get_clauses()
-        if not clauses:
-            raise HTTPException(status_code=404, detail="No clauses found in library")
+        print(f"➡️ Starting validation for contract_id={contract_id}")
+        clauses_out, risks_out, violations_out = [], [], []
+        total_compliance = 0
 
-        clause_texts = [c["text"] for c in clauses]
-        clause_vecs = embed_chunks(clause_texts)
-
-        clause_results = []
-        for i, vec in enumerate(clause_vecs):
-            res = chroma_manager.search_similar(
-                query_embedding=vec,
-                top_k=1,
-                collection_name="contracts"
+        for clause in CLAUSE_LIBRARY:
+            cid, cname, query, checklist = (
+                clause["id"],
+                clause["name"],
+                clause["query"],
+                clause["items"],
             )
+
+            print(f"🔍 Processing clause: {cname} (ID={cid})")
+            print(f"   ↳ Searching in vector DB with query: {query}")
+
+            # Search in chroma db
+            vec = embed_chunks([query])[0]
+            res = chroma_manager.search_similar(
+                query_embedding=vec, top_k=1, collection_name="contracts"
+            )
+
             if res and res.get("documents") and res["documents"][0]:
                 match_text = res["documents"][0][0]
-                distances = res.get("distances")
-                distance = distances[0][0] if distances else 1.0
-                similarity = 1 - distance
-                similarity = round(similarity, 3)
+                metadata = res.get("metadatas", [[{}]])[0][0]
+                page_number = metadata.get("page_number")
+                score = compliance_score(match_text, query)
+                status = "present" if score > 0 else "missing"
+                print(f"   ✅ Match found on page {page_number} with score={score}")
             else:
-                match_text = ""
-                similarity = 0.0
-            clause_results.append({
-                "clause": clause_texts[i],
-                "match": match_text,
-                "similarity": similarity,
-            })
+                match_text, page_number, score, status = "", None, 0, "missing"
+                print("   ⚠️ No matching clause found in document")
 
-        # Now compute the richer validation outputs similarly as we did before,
-        # combining clause_results, compliance, violations, etc.
-        # For brevity, you can integrate similar logic from our prior code to enrich the output.
+            # Build clause output with checklist evaluation
+            clause_items = []
+            for item in checklist:
+                if score >= 70:
+                    item_status = "pass"
+                elif score >= 40:
+                    item_status = "partial"
+                else:
+                    item_status = "fail"
 
-        # Example response skeleton:
+                clause_items.append(
+                    {"id": item["id"], "description": item["description"], "status": item_status}
+                )
+
+            clauses_out.append(
+                {
+                    "id": cid,
+                    "name": cname,
+                    "status": status,
+                    "page_number": page_number,
+                    "compliance_score": score,
+                    "items": clause_items,
+                }
+            )
+
+            # Risks
+            risk_score = int((100 - score) / 20) + 1
+            risks_out.append(
+                {
+                    "clause_id": cid,
+                    "page_number": page_number,
+                    "risk_score": risk_score,
+                    "risk_level": risk_level_from_score(score),
+                    "description": f"{cname} evaluated with compliance score {score}.",
+                }
+            )
+
+            # Violations
+            if score < 40:
+                violations_out.append(
+                    {
+                        "id": f"V{len(violations_out)+1}",
+                        "type": "Compliance",
+                        "clause_id": cid,
+                        "page_number": page_number,
+                        "message": f"{cname} violation due to weak/missing compliance (score={score}).",
+                    }
+                )
+                print(f"   ❌ Violation logged for {cname}")
+
+            total_compliance += score
+
+        # Overall scores
+        overall_compliance_score = (
+            int(total_compliance / len(CLAUSE_LIBRARY)) if CLAUSE_LIBRARY else 0
+        )
+        overall_risk_score = sum(r["risk_score"] for r in risks_out)
+        overall_risk_level = (
+            "High"
+            if overall_compliance_score < 40
+            else "Medium"
+            if overall_compliance_score < 70
+            else "Low"
+        )
+        overall_compliance_level = (
+            "High"
+            if overall_compliance_score >= 70
+            else "Medium"
+            if overall_compliance_score >= 40
+            else "Low"
+        )
+
+        print("📊 Final Aggregated Results:")
+        print(f"   ↳ Overall Compliance Score: {overall_compliance_score}")
+        print(f"   ↳ Overall Risk Score: {overall_risk_score}")
+        print(f"   ↳ Overall Risk Level: {overall_risk_level}")
+        print(f"   ↳ Overall Compliance Level: {overall_compliance_level}")
+        print("✅ Validation completed successfully")
+
         return {
             "contract_id": contract_id,
-            "clause_results": clause_results,
-            # Include "clauses", "compliance", "violations", "risk_score", "risks_involved" from your other function
+            "clauses": clauses_out,
+            "risks": risks_out,
+            "violations": violations_out,
+            "overall_risk_score": overall_risk_score,
+            "overall_risk_level": overall_risk_level,
+            "overall_compliance_score": overall_compliance_score,
+            "overall_compliance_level": overall_compliance_level,
+            "generated_at": datetime.utcnow().isoformat() + "Z",
         }
 
     except Exception as e:
+        print(f"🔥 Error while validating contract {contract_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
