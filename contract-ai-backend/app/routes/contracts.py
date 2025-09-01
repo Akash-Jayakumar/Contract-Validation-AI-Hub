@@ -63,39 +63,6 @@ async def upload_contract(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/search", response_model=SearchResponse)
-async def semantic_search_endpoint(query: SearchQuery = Body(...)):
-    """Semantic search across contracts"""
-    try:
-        results = semantic_search(
-            query=query.text,
-            top_k=query.top_k or 5,
-            contract_id=query.contract_id
-        )
-
-        formatted_results = []
-        if results['documents'] and results['documents'][0]:
-            for doc, metadata, distance in zip(
-                results['documents'][0],
-                results['metadatas'][0],
-                results['distances'][0]
-            ):
-                formatted_results.append({
-                    "text": doc,
-                    "contract_id": metadata.get("contract_id"),
-                    "chunk_index": metadata.get("chunk_index"),
-                    "score": 1 - distance
-                })
-
-        return SearchResponse(
-            query=query.text,
-            results=formatted_results,
-            total_results=len(formatted_results)
-        )
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
 
 @router.get("/{contract_id}/chunks")
 async def get_contract_chunks_endpoint(contract_id: str):

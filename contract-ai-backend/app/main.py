@@ -56,7 +56,7 @@ app.include_router(clauses_router, prefix="/clauses", tags=["clauses"])
 
 app.include_router(chat_router, prefix="/contracts/chat", tags=["chat"])
 
-app.include_router(validation_router, prefix="/contracts", tags=["validation"])
+app.include_router(validation_router, prefix="/validation", tags=["validation"])
 
 app.include_router(reports_router, prefix="/reports", tags=["reports"])
 app.include_router(policies_router, prefix="/policies", tags=["policies"])
