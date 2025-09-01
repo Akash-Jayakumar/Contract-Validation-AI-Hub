@@ -1,0 +1,57 @@
+{
+"template_type": "MSA",
+"version": "v1",
+"clauses": [
+{
+"id": "MSA-001",
+"title": "Limitation of Liability",
+"preferred": "Total liability capped at fees paid over the prior 12 months and excludes indirect, incidental, special, consequential, or punitive damages.",
+"fallbacks": [
+"Total liability capped at 6 months' fees (requires approval)",
+"Excludes indirect and consequential damages"
+],
+"keywords": ["liability", "indirect", "consequential", "cap", "damages"],
+"weight": 0.25
+},
+{
+"id": "MSA-002",
+"title": "Confidentiality",
+"preferred": "Confidentiality obligations with at least reasonable care; survival not less than 3 years.",
+"fallbacks": [
+"Survival for 2 years acceptable with exception approval"
+],
+"keywords": ["confidentiality", "non-disclosure", "reasonable care", "survive", "survival"],
+"weight": 0.18
+},
+{
+"id": "MSA-003",
+"title": "IP Ownership",
+"preferred": "Pre-existing IP remains with the original owner; work product ownership as per SoW; supplier grants necessary licenses.",
+"fallbacks": [
+"Joint ownership not preferred; require license safeguards"
+],
+"keywords": ["intellectual property", "IP", "ownership", "license", "work product"],
+"weight": 0.22
+},
+{
+"id": "MSA-004",
+"title": "Termination for Convenience",
+"preferred": "Either party may terminate for convenience with 30 days' notice; payment for work performed.",
+"fallbacks": [
+"Only customer termination for convenience acceptable with mutual obligations"
+],
+"keywords": ["terminate for convenience", "termination", "notice"],
+"weight": 0.15
+},
+{
+"id": "MSA-005",
+"title": "Payment Terms",
+"preferred": "Net 30 payment terms; late fees not exceeding statutory limits; undisputed amounts paid timely.",
+"fallbacks": [
+"Net 45 acceptable; late fees capped"
+],
+"keywords": ["payment", "invoice", "net 30", "late fee"],
+"weight": 0.20
+}
+]
+}

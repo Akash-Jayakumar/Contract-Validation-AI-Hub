@@ -1,19 +1,20 @@
 from fastapi import APIRouter, File, UploadFile, HTTPException, Body
-from typing import List, Optional
+from typing import List
 import uuid
 import os
 import shutil
-from app.services.ocr import extract_text_from_pdf, extract_text_from_image
+from app.services.ocr import extract_text_from_image
 from app.services.chunk import chunk_text
 from app.services.embeddings import embed_chunks, store_embeddings, semantic_search, get_contract_chunks
 from app.services.pdf_pages import extract_pages_text
 from app.services.sectioner import section_text_with_pages
 from app.models.contract import ContractUploadResponse, SearchQuery, SearchResponse
 from app.db.vector import chroma_manager
+from pdfminer.high_level import extract_text
 
 router = APIRouter(prefix="/contracts", tags=["contracts"])
 
-# Define a local upload directory inside your project
+# Local upload dir (optional backup)
 UPLOAD_DIR = os.path.join(os.getcwd(), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
@@ -159,6 +160,7 @@ async def upload_contract(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @router.post("/search", response_model=SearchResponse)
 async def semantic_search_endpoint(query: SearchQuery = Body(...)):
     """Semantic search across contracts"""
@@ -168,30 +170,30 @@ async def semantic_search_endpoint(query: SearchQuery = Body(...)):
             top_k=query.top_k or 5,
             contract_id=query.contract_id
         )
-        
-        # Format results
+
         formatted_results = []
         if results['documents'] and results['documents'][0]:
-            for i, (doc, metadata, distance) in enumerate(zip(
+            for doc, metadata, distance in zip(
                 results['documents'][0],
                 results['metadatas'][0],
                 results['distances'][0]
-            )):
+            ):
                 formatted_results.append({
                     "text": doc,
                     "contract_id": metadata.get("contract_id"),
                     "chunk_index": metadata.get("chunk_index"),
                     "score": 1 - distance
                 })
-        
+
         return SearchResponse(
             query=query.text,
             results=formatted_results,
             total_results=len(formatted_results)
         )
-        
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.get("/{contract_id}/chunks")
 async def get_contract_chunks_endpoint(contract_id: str):
@@ -230,24 +232,24 @@ async def get_contract_chunks_endpoint(contract_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @router.get("/{contract_id}/info")
 async def get_contract_info(contract_id: str):
     """Get contract information"""
     try:
-        # Get count for this specific contract
         results = chroma_manager.search_similar(
-            query_embedding=[0.0] * 384,  # Dummy embedding, just to use where clause
+            query_embedding=[0.0] * 384,  # dummy embedding
             top_k=1000,
             where={"contract_id": contract_id}
         )
-        
+
         chunk_count = len(results["documents"][0]) if results["documents"] and results["documents"][0] else 0
-        
+
         return {
             "contract_id": contract_id,
             "chunk_count": chunk_count,
             "total_documents_in_db": chroma_manager.get_collection_count()
         }
-        
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
