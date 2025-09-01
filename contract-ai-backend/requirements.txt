@@ -10,3 +10,6 @@ python-multipart
 pydantic
 requests
 chromadb
+fitz
+boto3
+PyMuPDF
