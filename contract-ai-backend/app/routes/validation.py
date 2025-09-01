@@ -137,7 +137,7 @@ def validate_contract(payload: Dict[str, Any] = Body(...)):
             )
 
             # Violations
-            if score < 40:
+            if score <= 40:
                 violations_out.append(
                     {
                         "id": f"V{len(violations_out)+1}",
