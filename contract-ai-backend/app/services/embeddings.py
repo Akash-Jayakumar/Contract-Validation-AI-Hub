@@ -31,7 +31,13 @@ def embed_text(text: str) -> List[float]:
     """
     return model.encode([text], normalize_embeddings=True)[0]
 
-def store_embeddings(contract_id: str, chunks: List[str], embeddings: List[List[float]]) -> List[str]:
+def store_embeddings(
+    contract_id: str,
+    chunks: List[str],
+    embeddings: List[List[float]],
+    titles: None = None,  # legacy param not used when metadatas provided
+    metadatas: None = None
+) -> List[str]:
     """
     Store chunks and embeddings in ChromaDB
     
@@ -39,11 +45,19 @@ def store_embeddings(contract_id: str, chunks: List[str], embeddings: List[List[
         contract_id: Unique contract identifier
         chunks: List of text chunks
         embeddings: List of embedding vectors
+        titles: Optional list of titles (legacy)
+        metadatas: Optional list of metadata dicts
     
     Returns:
         List of document IDs
     """
-    metadatas = [{"contract_id": contract_id, "chunk_index": i} for i in range(len(chunks))]
+    if metadatas is None:
+        metadatas = []
+        for i in range(len(chunks)):
+            md = {"contract_id": contract_id, "chunk_index": i}
+            if titles and i < len(titles):
+                md["title"] = titles[i]
+            metadatas.append(md)
     ids = [str(uuid.uuid4()) for _ in chunks]
     
     chroma_manager.add_documents(
