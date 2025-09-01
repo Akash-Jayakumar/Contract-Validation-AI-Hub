@@ -170,12 +170,6 @@ def validate_contract(payload: Dict[str, Any] = Body(...)):
             if overall_compliance_score >= 40
             else "Low"
         )
-
-        print("📊 Final Aggregated Results:")
-        print(f"   ↳ Overall Compliance Score: {overall_compliance_score}")
-        print(f"   ↳ Overall Risk Score: {overall_risk_score}")
-        print(f"   ↳ Overall Risk Level: {overall_risk_level}")
-        print(f"   ↳ Overall Compliance Level: {overall_compliance_level}")
         print("✅ Validation completed successfully")
 
         return {

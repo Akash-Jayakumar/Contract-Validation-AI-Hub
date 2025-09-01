@@ -37,6 +37,7 @@ async def upload_contract(file: UploadFile = File(...)):
         HAVE_PAGE_EXTRACT = False
 
     try:
+        print("📂 Starting contract upload...")
         contract_id = str(uuid.uuid4())
         filename = file.filename or "document"
         file_ext = filename.lower().split(".")[-1]
@@ -44,18 +45,18 @@ async def upload_contract(file: UploadFile = File(...)):
             raise HTTPException(status_code=400, detail="File must have an extension")
 
         dest_path = os.path.join(UPLOAD_DIR, f"{contract_id}.{file_ext}")
-
+        print(f"➡️ Saving file: {file.filename}")
         # Save file
         with open(dest_path, "wb") as buf:
             shutil.copyfileobj(file.file, buf)
-
+        print("📄 Extracting text from PDF...")
         # 1) Extract text (and pages if available)
         raw_text = ""
         sections = []
         titles = []
         page_starts = []
         page_ends = []
-
+        
         if file_ext == "pdf":
             if HAVE_PAGES and HAVE_PAGE_EXTRACT:
                 # Page-aware pipeline
@@ -129,6 +130,7 @@ async def upload_contract(file: UploadFile = File(...)):
         assert all(isinstance(d, str) and d.strip() != "" for d in fixed_bodies), "Empty document body detected"
 
         # 2) Embeddings
+        print("⚡ Generating embeddings...")
         try:
             embeddings = embed_chunks(fixed_bodies)
         except Exception as ee:
