@@ -14,6 +14,7 @@ from app.routes.reports import router as reports_router
 
 from app.routes.checklist import router as checklist_router
 from app.routes.policies import router as policies_router
+from app.routes.compliance_docx import router as compliance_docx_router
  
 app = FastAPI(title="Contract AI Backend")
  
@@ -55,10 +56,11 @@ app.include_router(clauses_router, prefix="/clauses", tags=["clauses"])
 
 app.include_router(chat_router, prefix="/contracts/chat", tags=["chat"])
 
-app.include_router(validation_router, prefix="/contracts", tags=["validation"])
+app.include_router(validation_router, prefix="/validation", tags=["validation"])
 
 app.include_router(reports_router, prefix="/reports", tags=["reports"])
 app.include_router(policies_router, prefix="/policies", tags=["policies"])
+app.include_router(compliance_docx_router, prefix="/compliance", tags=["compliance"])
 
 @app.get("/")
 async def root():
@@ -66,4 +68,3 @@ async def root():
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
- 
