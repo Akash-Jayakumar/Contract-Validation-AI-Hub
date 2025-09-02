@@ -4,7 +4,12 @@ from app.services.embeddings import semantic_search
 from app.services.llm import gemini_json, LLMJsonError
 import traceback
 import boto3
-import fitz  # PyMuPDF
+try:
+    import fitz  # PyMuPDF
+    HAVE_FITZ = hasattr(fitz, "open")
+except Exception:
+    fitz = None
+    HAVE_FITZ = False
 
 router = APIRouter(prefix="/policies", tags=["policies"])
 
@@ -84,9 +89,15 @@ def weighted_overall(violations: List[Dict[str, Any]]) -> int:
 
 # ---------- PDF highlighter ----------
 def highlight_pdf(pdf_path: str, violations: list, output_path: str):
+    if not HAVE_FITZ:
+        # If fitz is not available, just copy the file without highlighting
+        import shutil
+        shutil.copy(pdf_path, output_path)
+        return output_path
+
     doc = fitz.open(pdf_path)
     for v in violations:
-        if not v.get("violated"): 
+        if not v.get("violated"):
             continue
         for ev in v.get("evidence", []):
             quote = ev.get("quote", "").strip()
