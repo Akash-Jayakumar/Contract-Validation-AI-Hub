@@ -3,6 +3,7 @@ from typing import Dict, Any
 from datetime import datetime
 from app.services.embeddings import embed_chunks
 from app.db.vector import chroma_manager
+from app.services.llm import generate_recommendation
 
 router = APIRouter()
 
@@ -113,6 +114,15 @@ def validate_contract(payload: Dict[str, Any] = Body(...)):
                     {"id": item["id"], "description": item["description"], "status": item_status}
                 )
 
+            # ✅ LLM Recommendation
+            recommendation = generate_recommendation(
+                clause_name=cname,
+                score=score,
+                risk_level=risk_level_from_score(score),
+                checklist=clause_items,
+                matched_text=match_text,
+            )
+
             clauses_out.append(
                 {
                     "id": cid,
@@ -121,6 +131,7 @@ def validate_contract(payload: Dict[str, Any] = Body(...)):
                     "page_number": page_number,
                     "compliance_score": score,
                     "items": clause_items,
+                    "recommendation": recommendation,  # NEW
                 }
             )
 
@@ -133,11 +144,12 @@ def validate_contract(payload: Dict[str, Any] = Body(...)):
                     "risk_score": risk_score,
                     "risk_level": risk_level_from_score(score),
                     "description": f"{cname} evaluated with compliance score {score}.",
+                    "recommendation": recommendation,  # NEW
                 }
             )
 
             # Violations
-            if score <= 40:
+            if score < 40:
                 violations_out.append(
                     {
                         "id": f"V{len(violations_out)+1}",
@@ -170,8 +182,7 @@ def validate_contract(payload: Dict[str, Any] = Body(...)):
             if overall_compliance_score >= 40
             else "Low"
         )
-        print("✅ Validation completed successfully")
-
+        
         return {
             "contract_id": contract_id,
             "clauses": clauses_out,
