@@ -5,6 +5,37 @@ import json
 import re
 from app.config import GEMINI_API_KEY
 
+import os
+import google.generativeai as genai
+
+# Configure Gemini
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+
+def generate_recommendation(clause_name, score, risk_level, checklist, matched_text):
+    """
+    Generate LLM-based recommendation for a clause based on compliance score and risk.
+    """
+    checklist_summary = ", ".join(
+        [f"{item['description']}={item['status']}" for item in checklist]
+    )
+    prompt = f"""
+    You are a contract compliance assistant.
+    Clause: {clause_name}
+    Risk Level: {risk_level}
+    Compliance Score: {score}
+    Checklist Results: {checklist_summary}
+    Extracted Text: {matched_text or "N/A"}
+
+    Based on this, give a short, actionable recommendation (1-2 sentences)
+    to improve compliance and reduce risk.
+    """
+
+    try:
+        model = genai.GenerativeModel("gemini-1.5-flash")
+        response = model.generate_content(prompt)
+        return response.text.strip()
+    except Exception as e:
+        return f"⚠️ Could not generate recommendation: {str(e)}"
 
 def gemini_flash_complete(prompt: str, model_id: str = "gemini-2.0-flash-exp") -> str:
     """Generate content using Gemini Flash model"""
