@@ -1,4 +1,5 @@
 import os
+import re
 from PIL import Image
 import pytesseract
 from pdf2image import convert_from_path
@@ -61,6 +62,8 @@ def extract_text(file_path: str, lang: str = "eng") -> str:
     else:
         raise ValueError(f"Unsupported file type: {ext}")
     
+    # OCR pre-clean: insert space before glued 1.x tokens
+    text = re.sub(r"(?<!\s)(\d+\.\d+)", r" \1", text)
     return text.strip()
 
 def extract_text_from_pdf(file_path: str, lang: str = "eng") -> str:

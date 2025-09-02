@@ -7,7 +7,7 @@ from app.services.ocr import extract_text_from_image
 from app.services.chunk import chunk_text
 from app.services.embeddings import embed_chunks, store_embeddings, semantic_search, get_contract_chunks
 from app.services.pdf_pages import extract_pages_text
-from app.services.sectioner import section_text_with_pages
+from app.services.sectioner import section_text_with_pages, section_text_best
 from app.models.contract import ContractUploadResponse, SearchQuery, SearchResponse
 from app.db.vector import chroma_manager
 from pdfminer.high_level import extract_text
@@ -18,6 +18,67 @@ router = APIRouter(prefix="/contracts", tags=["contracts"])
 UPLOAD_DIR = os.path.join(os.getcwd(), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+from fastapi import HTTPException
+import concurrent.futures
+from pdfminer.high_level import extract_text as pdf_extract_text
+from pdf2image import convert_from_path
+import pytesseract
+from PIL import Image
+
+def _save_upload(f: UploadFile, dest_dir: str, out_id: str) -> str:
+    ext = (f.filename or "").lower().split(".")[-1]
+    if not ext:
+        raise HTTPException(status_code=400, detail="File must have an extension")
+    dst = os.path.join(dest_dir, f"{out_id}.{ext}")
+    with open(dst, "wb") as buf:
+        shutil.copyfileobj(f.file, buf)
+    return dst
+
+def _extract_pdf_live(path: str) -> str:
+    return pdf_extract_text(path) or ""
+
+def _extract_pdf_ocr(path: str, dpi: int = 300, lang: str = "eng") -> str:
+    pages = convert_from_path(path, dpi=dpi)
+    txt = []
+    for img in pages:
+        txt.append(pytesseract.image_to_string(img, lang=lang) or "")
+    return "\n".join(txt).strip()
+
+def _extract_image(path: str, lang: str = "eng") -> str:
+    img = Image.open(path)
+    return pytesseract.image_to_string(img, lang=lang) or ""
+
+def _process_one(file_info: dict) -> dict:
+    path = file_info["path"]
+    filename = file_info["filename"]
+    contract_id = file_info["contract_id"]
+    ext = filename.lower().split(".")[-1]
+
+    text = ""
+    used_ocr = False
+    if ext == "pdf":
+        text = _extract_pdf_live(path)
+        if not text.strip():  # scanned PDF fallback to OCR
+            text = _extract_pdf_ocr(path, dpi=300, lang="eng")
+            used_ocr = True
+    elif ext in ("png", "jpg", "jpeg", "tiff", "bmp"):
+        text = _extract_image(path, lang="eng")
+        used_ocr = True
+    else:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type: {ext}")
+
+    if not text.strip():
+        raise HTTPException(status_code=400, detail="Could not extract text from document")
+
+    # If you want to continue to section/embed here, call your existing section/embedding functions.
+
+    return {
+        "contract_id": contract_id,
+        "filename": filename,
+        "characters": len(text),
+        "message": "Extraction completed"
+    }
+
 @router.post("/upload")
 async def upload_contract(file: UploadFile = File(...)):
     from fastapi import HTTPException
@@ -26,7 +87,7 @@ async def upload_contract(file: UploadFile = File(...)):
     from app.services.embeddings import embed_chunks, store_embeddings
     from app.services.chunk import chunk_text
     try:
-        from app.services.sectioner import section_text_with_pages
+        from app.services.sectioner import section_text_bold_aware
         HAVE_PAGES = True
     except Exception:
         HAVE_PAGES = False
@@ -56,14 +117,14 @@ async def upload_contract(file: UploadFile = File(...)):
         titles = []
         page_starts = []
         page_ends = []
-        
+
         if file_ext == "pdf":
             if HAVE_PAGES and HAVE_PAGE_EXTRACT:
                 # Page-aware pipeline
                 pages = extract_pages_text(dest_path)  # [(pno, text)]
                 if not pages or all(not ptxt.strip() for _, ptxt in pages):
                     raise HTTPException(status_code=400, detail="No text extracted from PDF pages")
-                sec_objs = section_text_with_pages(pages)
+                sec_objs = section_text_best(dest_path)
                 if not sec_objs:
                     raise HTTPException(status_code=400, detail="Could not segment PDF into sections")
                 sections = [s["text"] for s in sec_objs]
@@ -161,6 +222,46 @@ async def upload_contract(file: UploadFile = File(...)):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/upload-multiple")
+async def upload_multiple_contracts(
+    files: List[UploadFile] = File(...),
+    parallel: bool = True
+):
+    if not files:
+        raise HTTPException(status_code=400, detail="No files provided")
+
+    # Save all first to disk (avoid UploadFile stream across threads)
+    saved: List[dict] = []
+    for f in files:
+        contract_id = str(uuid.uuid4())
+        path = _save_upload(f, UPLOAD_DIR, contract_id)
+        saved.append({"contract_id": contract_id, "path": path, "filename": f.filename})
+
+    results: List[dict] = []
+    if parallel and len(saved) > 1:
+        # Thread pool is OK here (I/O + external OCR subprocess); adjust workers as needed
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(4, len(saved))) as ex:
+            futs = [ex.submit(_process_one, s) for s in saved]
+            for fut in concurrent.futures.as_completed(futs):
+                try:
+                    results.append(fut.result())
+                except HTTPException as he:
+                    # keep per-file error in results
+                    results.append({"error": he.detail})
+                except Exception as e:
+                    results.append({"error": str(e)})
+    else:
+        for s in saved:
+            try:
+                results.append(_process_one(s))
+            except HTTPException as he:
+                results.append({"error": he.detail})
+            except Exception as e:
+                results.append({"error": str(e)})
+
+    return {"count": len(results), "results": results}
 
 
 @router.get("/{contract_id}/chunks")
