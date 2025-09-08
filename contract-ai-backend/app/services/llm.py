@@ -114,9 +114,30 @@ def gemini_json(prompt: str, response_schema: dict | None = None, temperature: f
         raise LLMJsonError(f"Gemini API request failed: {e}")
 
 
+def categorize_chunk(chunk_text: str) -> str:
+    """Categorize a contract chunk based on its topic using Gemini API"""
+    if not GEMINI_API_KEY:
+        raise ValueError("GEMINI_API_KEY environment variable is not set")
+
+    prompt = f"""Analyze the following contract text chunk and categorize it with a concise category name based on its main topic or clause type.
+
+Text chunk:
+{chunk_text}
+
+Please respond with only a single, concise category name (e.g., "Payment Terms", "Confidentiality", "Termination", "Liability", "Intellectual Property", etc.). Do not include any explanation or additional text."""
+
+    try:
+        category = gemini_flash_complete(prompt).strip()
+        # Clean up the response to ensure it's just the category name
+        category = category.strip('"').strip("'").strip()
+        return category if category else "Uncategorized"
+    except Exception as e:
+        return f"Uncategorized (Error: {str(e)})"
+
+
 class LLMService:
     """Service for handling LLM interactions"""
-    
+
     @staticmethod
     def generate_response(prompt: str, context: str, max_tokens: int = 500, use_gemini: bool = True) -> str:
         """Generate response using LLM"""
@@ -130,7 +151,7 @@ class LLMService:
         else:
             # Placeholder for other LLM integrations
             return f"Generated response based on context: {context[:100]}..."
-    
+
     @staticmethod
     def analyze_contract(text: str, use_gemini: bool = True) -> Dict:
         """Analyze contract text for key insights"""
@@ -145,7 +166,7 @@ Please provide a structured analysis with the following sections:
 2. Risk Identification
 3. Key Clauses Summary
 4. Recommendations"""
-                
+
                 analysis = gemini_flash_complete(prompt)
                 return {"insights": analysis}
             except Exception as e:
