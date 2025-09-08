@@ -8,6 +8,7 @@ from app.services.chunk import chunk_text
 from app.services.embeddings import embed_chunks, store_embeddings, semantic_search, get_contract_chunks
 from app.services.pdf_pages import extract_pages_text
 from app.services.sectioner import section_text_with_pages, section_text_best
+from app.services.llm import categorize_chunk
 from app.models.contract import ContractUploadResponse, SearchQuery, SearchResponse
 from app.db.vector import chroma_manager
 from pdfminer.high_level import extract_text
@@ -190,6 +191,18 @@ async def upload_contract(file: UploadFile = File(...)):
         # Ensure no empty document bodies
         assert all(isinstance(d, str) and d.strip() != "" for d in fixed_bodies), "Empty document body detected"
 
+        # 1.5) Categorize chunks using Gemini API
+        print("🤖 Categorizing chunks...")
+        categories = []
+        for i, chunk_text in enumerate(fixed_bodies):
+            try:
+                category = categorize_chunk(chunk_text)
+                categories.append(category)
+                print(f"   Chunk {i+1}/{len(fixed_bodies)}: {category}")
+            except Exception as ce:
+                print(f"   Chunk {i+1}/{len(fixed_bodies)}: Categorization failed - {str(ce)}")
+                categories.append("Uncategorized")
+
         # 2) Embeddings
         print("⚡ Generating embeddings...")
         try:
@@ -197,10 +210,10 @@ async def upload_contract(file: UploadFile = File(...)):
         except Exception as ee:
             raise HTTPException(status_code=500, detail=f"Embedding failed: {ee}")
 
-        # 3) Store with metadata (including pages if available)
+        # 3) Store with metadata (including pages and categories if available)
         metadatas = []
         for i in range(len(fixed_bodies)):
-            md = {"contract_id": contract_id, "chunk_index": i, "title": fixed_titles[i]}
+            md = {"contract_id": contract_id, "chunk_index": i, "title": fixed_titles[i], "category": categories[i]}
             if page_starts and page_ends and i < len(page_starts):
                 md["page_start"] = page_starts[i]
                 md["page_end"] = page_ends[i]
@@ -292,6 +305,7 @@ async def get_contract_chunks_endpoint(contract_id: str):
                 "chunk_index": md.get("chunk_index"),
                 "page_start": md.get("page_start"),
                 "page_end": md.get("page_end"),
+                "category": md.get("category") or "Uncategorized",
             })
 
         return {"contract_id": contract_id, "chunks": formatted}
