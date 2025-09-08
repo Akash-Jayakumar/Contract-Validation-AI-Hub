@@ -17,6 +17,7 @@ def embed_chunks(chunks: List[str]) -> List[List[float]]:
     Returns:
         List of embedding vectors
     """
+    print("chunking the list of texts")
     return model.encode(chunks, normalize_embeddings=True)
 
 def embed_text(text: str) -> List[float]:
@@ -114,9 +115,81 @@ def get_contract_chunks(contract_id: str) -> Dict[str, Any]:
 def delete_contract_embeddings(contract_id: str) -> None:
     """
     Delete all embeddings for a specific contract
-    
+
     Args:
         contract_id: Contract identifier
     """
     # This would require implementing delete_by_metadata in ChromaDBManager
     pass
+
+def upload_standard_clauses(json_path: str = "./app/standards/msa_playbook.json", collection_name: str = "standard_clauses") -> int:
+    """
+    Upload standard clauses from JSON file to ChromaDB
+
+    Args:
+        json_path: Path to the JSON file containing standard clauses
+        collection_name: Name of the ChromaDB collection
+
+    Returns:
+        Number of clauses uploaded
+    """
+    import json
+    import os
+
+    if not os.path.exists(json_path):
+        raise FileNotFoundError(f"JSON file not found: {json_path}")
+
+    with open(json_path, 'r') as f:
+        data = json.load(f)
+
+    clauses = data.get("clauses", [])
+    if not clauses:
+        print("No clauses found in JSON file")
+        return 0
+
+    documents = []
+    metadatas = []
+    ids = []
+
+    for clause in clauses:
+        clause_id = clause.get("id", str(uuid.uuid4()))
+        title = clause.get("title", "")
+        preferred = clause.get("preferred", "")
+        fallbacks = clause.get("fallbacks", [])
+        keywords = clause.get("keywords", [])
+        weight = clause.get("weight", 0.0)
+
+        # Combine preferred and fallbacks into text
+        text_parts = [preferred] + fallbacks
+        text = " ".join(text_parts)
+
+        metadata = {
+            "clause_id": clause_id,
+            "title": title,
+            "category": "MSA",  # Assuming MSA playbook
+            "source": data.get("template_type", "MSA"),
+            "version": data.get("version", "v1"),
+            "keywords": ", ".join(keywords) if keywords else "",
+            "weight": weight,
+            "preferred": preferred,
+            "fallbacks": ", ".join(fallbacks) if fallbacks else ""
+        }
+
+        documents.append(text)
+        metadatas.append(metadata)
+        ids.append(clause_id)
+
+    # Generate embeddings
+    embeddings = embed_chunks(documents)
+
+    # Store in ChromaDB
+    chroma_manager.add_documents(
+        documents=documents,
+        embeddings=embeddings,
+        metadatas=metadatas,
+        ids=ids,
+        collection_name=collection_name
+    )
+
+    print(f"Uploaded {len(clauses)} standard clauses to ChromaDB collection '{collection_name}'")
+    return len(clauses)

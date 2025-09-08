@@ -73,6 +73,45 @@ class ChromaDBManager:
             "metadata": collection.metadata
         }
 
+    def update_documents(self,
+                        ids: List[str],
+                        documents: Optional[List[str]] = None,
+                        embeddings: Optional[List[List[float]]] = None,
+                        metadatas: Optional[List[Dict[str, Any]]] = None,
+                        collection_name: str = "contracts") -> None:
+        """Update documents in ChromaDB"""
+        collection = self.get_or_create_collection(collection_name)
+        collection.update(
+            ids=ids,
+            documents=documents,
+            embeddings=embeddings,
+            metadatas=metadatas
+        )
+
+    def delete_documents(self,
+                        ids: List[str],
+                        collection_name: str = "contracts") -> None:
+        """Delete documents from ChromaDB"""
+        collection = self.get_or_create_collection(collection_name)
+        collection.delete(ids=ids)
+
+    def get_documents(self,
+                     ids: Optional[List[str]] = None,
+                     where: Optional[Dict[str, Any]] = None,
+                     limit: Optional[int] = None,
+                     offset: Optional[int] = None,
+                     include: Optional[List[str]] = None,
+                     collection_name: str = "contracts") -> Dict[str, Any]:
+        """Get documents from ChromaDB"""
+        collection = self.get_or_create_collection(collection_name)
+        return collection.get(
+            ids=ids,
+            where=where,
+            limit=limit,
+            offset=offset,
+            include=include or ["documents", "metadatas", "ids"]
+        )
+
 # Global instance
 chroma_manager = ChromaDBManager()
 
